@@ -2,3 +2,6 @@
 [build]
   command = "bash scripts/build-site.sh"
   publish = "_site"
+
+[functions]
+  directory = "netlify/functions"

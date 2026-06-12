@@ -28,8 +28,16 @@ cp .env.example .env   # add your Nearmap API key
 npm run dev
 ```
 
-Without `VITE_NEARMAP_API_KEY` the map falls back to OpenStreetMap tiles, so
-the workflow is testable without a Nearmap subscription.
+Tile sources:
+
+- **Deployed (Netlify):** set `NEARMAP_API_KEY` (server-side, used by the
+  `/api/tiles` proxy function in `netlify/functions/tiles.mjs`) and
+  `VITE_NEARMAP_PROXY=true` (tells the client to use the proxy). The key never
+  appears in the client bundle.
+- **Local dev:** put `VITE_NEARMAP_API_KEY` in `.env` for direct Nearmap
+  access, or run `netlify dev` to exercise the proxy locally.
+- **No key at all:** the map falls back to OpenStreetMap tiles, so the
+  workflow is testable without a Nearmap subscription.
 
 ## Data
 
