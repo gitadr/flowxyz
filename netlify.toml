@@ -1,0 +1,5 @@
+# Builds Mapflow experiment 01 (the current public face of mapflow.xyz).
+[build]
+  base = "experiments/01-ground-aerial-link"
+  command = "npm run build"
+  publish = "dist"
