@@ -1,6 +1,9 @@
 import { useEffect, useRef } from "react"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
+import type { Measurement } from "../App"
+import { formatDistance } from "../lib/geo"
+import type { ResectionResult } from "../lib/resection"
 import { tileLayer } from "../lib/tiles"
 import type { LinkedAnnotation, LinkStep, MapPoint, PhotoMeta } from "../lib/types"
 
@@ -8,8 +11,10 @@ interface Props {
   photo: PhotoMeta
   links: LinkedAnnotation[]
   step: LinkStep
-  selectedId: string | null
-  onSelect: (id: string | null) => void
+  selectedIds: string[]
+  measurement: Measurement | null
+  proposal: ResectionResult | null
+  onSelect: (id: string) => void
   onMapPicked: (point: MapPoint) => void
 }
 
@@ -29,7 +34,41 @@ function headingWedge(center: L.LatLng, headingDeg: number): L.LatLng[] {
   return pts
 }
 
-export function MapPanel({ photo, links, step, selectedId, onSelect, onMapPicked }: Props) {
+function addCamera(
+  layer: L.LayerGroup,
+  pos: L.LatLng,
+  headingDeg: number | null,
+  opts: { color: string; label: string; dashed?: boolean; faded?: boolean },
+) {
+  if (headingDeg != null) {
+    L.polygon(headingWedge(pos, headingDeg), {
+      color: opts.color,
+      weight: 1,
+      dashArray: opts.dashed ? "4 4" : undefined,
+      fillOpacity: opts.faded ? 0.06 : 0.15,
+      interactive: false,
+    }).addTo(layer)
+  }
+  L.circleMarker(pos, {
+    radius: opts.faded ? 5 : 8,
+    color: opts.color,
+    fillColor: opts.color,
+    fillOpacity: opts.faded ? 0.4 : 0.9,
+  })
+    .bindTooltip(opts.label, { direction: "top" })
+    .addTo(layer)
+}
+
+export function MapPanel({
+  photo,
+  links,
+  step,
+  selectedIds,
+  measurement,
+  proposal,
+  onSelect,
+  onMapPicked,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const annotationLayerRef = useRef<L.LayerGroup | null>(null)
@@ -70,34 +109,60 @@ export function MapPanel({ photo, links, step, selectedId, onSelect, onMapPicked
     }
   }, [photo.lat, photo.lng])
 
-  // Redraw marker, heading wedge, and linked annotations.
+  // Redraw cameras, linked annotations, measurement, and refinement proposal.
   useEffect(() => {
     const layer = annotationLayerRef.current
     if (!layer) return
     layer.clearLayers()
 
     if (photo.lat != null && photo.lng != null) {
-      const pos = L.latLng(photo.lat, photo.lng)
-      if (photo.headingDeg != null) {
-        L.polygon(headingWedge(pos, photo.headingDeg), {
+      const gps = L.latLng(photo.lat, photo.lng)
+      if (photo.refined) {
+        addCamera(layer, gps, photo.headingDeg, {
+          color: "#64748b",
+          label: "GPS location (original)",
+          faded: true,
+        })
+        addCamera(
+          layer,
+          L.latLng(photo.refined.lat, photo.refined.lng),
+          photo.refined.headingDeg,
+          { color: "#2563eb", label: "Photo location (refined)" },
+        )
+      } else {
+        addCamera(layer, gps, photo.headingDeg, {
           color: "#2563eb",
-          weight: 1,
-          fillOpacity: 0.15,
-          interactive: false,
-        }).addTo(layer)
+          label: "Photo location",
+        })
       }
-      L.circleMarker(pos, {
-        radius: 8,
-        color: "#2563eb",
-        fillColor: "#3b82f6",
-        fillOpacity: 0.9,
+    }
+
+    if (proposal) {
+      addCamera(layer, L.latLng(proposal.lat, proposal.lng), proposal.headingDeg, {
+        color: "#f59e0b",
+        label: `Refined position (fit ±${proposal.rmsDeg.toFixed(1)}°)`,
+        dashed: true,
       })
-        .bindTooltip("Photo location", { direction: "top" })
+    }
+
+    if (measurement) {
+      L.polyline(
+        [
+          [measurement.a.mapPoint.lat, measurement.a.mapPoint.lng],
+          [measurement.b.mapPoint.lat, measurement.b.mapPoint.lng],
+        ],
+        { color: "#fff", weight: 2, dashArray: "6 4", interactive: false },
+      )
+        .bindTooltip(formatDistance(measurement.meters), {
+          permanent: true,
+          direction: "center",
+          className: "distance-tooltip",
+        })
         .addTo(layer)
     }
 
     for (const link of links) {
-      const selected = link.id === selectedId
+      const selected = selectedIds.includes(link.id)
       L.circleMarker([link.mapPoint.lat, link.mapPoint.lng], {
         radius: selected ? 10 : 7,
         color: link.color,
@@ -106,10 +171,10 @@ export function MapPanel({ photo, links, step, selectedId, onSelect, onMapPicked
         fillOpacity: selected ? 0.7 : 0.4,
       })
         .bindTooltip(link.label, { direction: "top" })
-        .on("click", () => onSelect(link.id === selectedId ? null : link.id))
+        .on("click", () => onSelect(link.id))
         .addTo(layer)
     }
-  }, [photo, links, selectedId, onSelect])
+  }, [photo, links, selectedIds, measurement, proposal, onSelect])
 
   return (
     <div
