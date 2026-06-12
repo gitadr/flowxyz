@@ -11,7 +11,9 @@ export async function extractPhotoMeta(file: File): Promise<PhotoMeta> {
     const data = await exifr.parse(file, {
       pick: [
         "GPSLatitude",
+        "GPSLatitudeRef",
         "GPSLongitude",
+        "GPSLongitudeRef",
         "GPSImgDirection",
         "GPSDestBearing",
         "DateTimeOriginal",
