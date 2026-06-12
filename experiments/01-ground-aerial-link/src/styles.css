@@ -214,6 +214,31 @@ aside {
   background: transparent;
 }
 
+.distance-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  background: rgba(15, 23, 42, 0.85);
+  color: #fff;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.distance-tooltip {
+  background: rgba(15, 23, 42, 0.85);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.distance-tooltip::before {
+  display: none;
+}
+
 .hint {
   font-size: 0.8rem;
   color: #94a3b8;

@@ -20,6 +20,20 @@ Upload iPhone photo
 The photo location is marked on the map; if the EXIF contains
 `GPSImgDirection`, a wedge shows the approximate camera heading.
 
+Two analysis tools build on the links:
+
+- **Distance on selection** — select any two linked objects (in either view or
+  the sidebar) and the ground distance between their map points (haversine)
+  appears as a dashed line with a label in both the photo and the map.
+- **Refine position** — with 2+ links, each link's horizontal position in the
+  photo is a bearing constraint (using the field of view from the EXIF focal
+  length, or an assumed 69° iPhone FOV). With 2 links the camera heading is
+  re-solved; with 3+ a least-squares resection (`src/lib/resection.ts`)
+  re-solves the standpoint and heading, correcting GPS error. The proposal
+  shows as an amber ghost marker; accepting it records `photo.refined` in the
+  session and export. Verify the solver with
+  `npx tsx scripts/test-resection.ts`.
+
 ## Setup
 
 ```bash

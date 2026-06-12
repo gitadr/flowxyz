@@ -3,6 +3,8 @@ import { PhotoPanel } from "./components/PhotoPanel"
 import { MapPanel } from "./components/MapPanel"
 import { LinkList } from "./components/LinkList"
 import { extractPhotoMeta } from "./lib/exif"
+import { formatDistance, haversineMeters } from "./lib/geo"
+import { solveResection, type ResectionResult } from "./lib/resection"
 import { clearSession, downloadExport, saveSession } from "./lib/storage"
 import { usingNearmap } from "./lib/tiles"
 import type {
@@ -15,12 +17,22 @@ import type {
 
 const COLORS = ["#e11d48", "#f59e0b", "#10b981", "#8b5cf6", "#06b6d4", "#f97316"]
 
+// iPhone main-lens horizontal FOV, used when EXIF lacks a focal length.
+const FALLBACK_HFOV_DEG = 69
+
+export interface Measurement {
+  a: LinkedAnnotation
+  b: LinkedAnnotation
+  meters: number
+}
+
 export default function App() {
   const [photo, setPhoto] = useState<PhotoMeta | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [links, setLinks] = useState<LinkedAnnotation[]>([])
   const [step, setStep] = useState<LinkStep>({ mode: "idle" })
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [proposal, setProposal] = useState<ResectionResult | null>(null)
 
   const pendingColor = COLORS[links.length % COLORS.length]
 
@@ -33,9 +45,18 @@ export default function App() {
     setImageUrl(URL.createObjectURL(file))
     setLinks([])
     setStep({ mode: "idle" })
-    setSelectedId(null)
+    setSelectedIds([])
+    setProposal(null)
     setPhoto(await extractPhotoMeta(file))
   }
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id)
+        ? prev.filter((s) => s !== id)
+        : [...prev, id].slice(-2), // keep at most 2, dropping the oldest
+    )
+  }, [])
 
   const handleRegionDrawn = useCallback((photoRegion: PhotoRegion) => {
     setStep({ mode: "pick-map", photoRegion })
@@ -54,7 +75,6 @@ export default function App() {
           createdAt: new Date().toISOString(),
         }
         setLinks((prev) => [...prev, link])
-        setSelectedId(link.id)
         return { mode: "idle" }
       })
     },
@@ -89,6 +109,47 @@ export default function App() {
   }
 
   const hasLocation = photo.lat != null && photo.lng != null
+  const usingAssumedFov = photo.hfovDeg == null
+
+  const selected = selectedIds
+    .map((id) => links.find((l) => l.id === id))
+    .filter((l): l is LinkedAnnotation => Boolean(l))
+  const measurement: Measurement | null =
+    selected.length === 2
+      ? {
+          a: selected[0],
+          b: selected[1],
+          meters: haversineMeters(selected[0].mapPoint, selected[1].mapPoint),
+        }
+      : null
+
+  function refinePosition() {
+    if (photo!.lat == null || photo!.lng == null) return
+    const result = solveResection(
+      links,
+      { lat: photo!.lat, lng: photo!.lng },
+      photo!.hfovDeg ?? FALLBACK_HFOV_DEG,
+    )
+    setProposal(result)
+  }
+
+  function acceptProposal() {
+    if (!proposal) return
+    setPhoto({
+      ...photo!,
+      refined: {
+        lat: proposal.lat,
+        lng: proposal.lng,
+        headingDeg: proposal.headingDeg,
+      },
+    })
+    setProposal(null)
+  }
+
+  const proposalMovedM =
+    proposal && hasLocation
+      ? haversineMeters({ lat: photo.lat!, lng: photo.lng! }, proposal)
+      : 0
 
   return (
     <div className="app">
@@ -98,8 +159,13 @@ export default function App() {
           <span>{photo.fileName}</span>
           {hasLocation ? (
             <span>
-              {photo.lat!.toFixed(6)}, {photo.lng!.toFixed(6)}
-              {photo.headingDeg != null && ` · heading ${Math.round(photo.headingDeg)}°`}
+              {(photo.refined?.lat ?? photo.lat!).toFixed(6)},{" "}
+              {(photo.refined?.lng ?? photo.lng!).toFixed(6)}
+              {photo.refined
+                ? ` · heading ${Math.round(photo.refined.headingDeg)}° (refined)`
+                : photo.headingDeg != null
+                  ? ` · heading ${Math.round(photo.headingDeg)}°`
+                  : ""}
             </span>
           ) : (
             <span className="warn">No GPS data in this photo</span>
@@ -130,6 +196,37 @@ export default function App() {
             <button onClick={() => setStep({ mode: "idle" })}>Cancel</button>
           </>
         )}
+
+        {step.mode === "idle" && !proposal && (
+          <button
+            onClick={refinePosition}
+            disabled={!hasLocation || links.length < 2}
+            title={
+              links.length < 2
+                ? "Link at least 2 objects to refine the camera position"
+                : usingAssumedFov
+                  ? `Assuming ${FALLBACK_HFOV_DEG}° field of view (no focal length in EXIF)`
+                  : undefined
+            }
+          >
+            Refine position
+          </button>
+        )}
+        {proposal && (
+          <>
+            <span className="instruction">
+              {links.length < 3 ? "Heading" : "Position"} refined: moved{" "}
+              {formatDistance(proposalMovedM)}, heading{" "}
+              {Math.round(proposal.headingDeg)}°, fit ±{proposal.rmsDeg.toFixed(1)}°
+              {usingAssumedFov && " (assumed FOV)"}
+            </span>
+            <button className="primary" onClick={acceptProposal}>
+              Accept
+            </button>
+            <button onClick={() => setProposal(null)}>Discard</button>
+          </>
+        )}
+
         <span className="spacer" />
         <button onClick={() => downloadExport(photo, links)} disabled={links.length === 0}>
           Export JSON
@@ -146,7 +243,8 @@ export default function App() {
           onClick={() => {
             clearSession()
             setLinks([])
-            setSelectedId(null)
+            setSelectedIds([])
+            setProposal(null)
             setStep({ mode: "idle" })
           }}
         >
@@ -160,32 +258,44 @@ export default function App() {
           links={links}
           step={step}
           pendingColor={pendingColor}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
+          selectedIds={selectedIds}
+          measurement={measurement}
+          onSelect={toggleSelect}
           onRegionDrawn={handleRegionDrawn}
         />
         <MapPanel
           photo={photo}
           links={links}
           step={step}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
+          selectedIds={selectedIds}
+          measurement={measurement}
+          proposal={proposal}
+          onSelect={toggleSelect}
           onMapPicked={handleMapPicked}
         />
         <aside>
           <h2>Linked objects</h2>
           <LinkList
             links={links}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
+            selectedIds={selectedIds}
+            onSelect={toggleSelect}
             onRename={(id, label) =>
               setLinks((prev) => prev.map((l) => (l.id === id ? { ...l, label } : l)))
             }
             onDelete={(id) => {
               setLinks((prev) => prev.filter((l) => l.id !== id))
-              if (selectedId === id) setSelectedId(null)
+              setSelectedIds((prev) => prev.filter((s) => s !== id))
             }}
           />
+          {links.length >= 2 && !measurement && (
+            <p className="hint">Select two objects to see the distance between them.</p>
+          )}
+          {measurement && (
+            <p className="hint">
+              {measurement.a.label} ↔ {measurement.b.label}:{" "}
+              <strong>{formatDistance(measurement.meters)}</strong>
+            </p>
+          )}
         </aside>
       </main>
     </div>

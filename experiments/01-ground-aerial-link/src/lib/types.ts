@@ -4,7 +4,11 @@ export interface PhotoMeta {
   lng: number | null
   /** Compass heading the camera was pointing, degrees from true north. */
   headingDeg: number | null
+  /** Horizontal field of view from EXIF focal length; null if unknown. */
+  hfovDeg: number | null
   takenAt: string | null
+  /** Resection-corrected standpoint, if the user accepted one. */
+  refined?: { lat: number; lng: number; headingDeg: number } | null
 }
 
 /** Rectangle on the ground photo, normalized to 0–1 of image dimensions. */

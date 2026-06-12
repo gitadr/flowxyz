@@ -1,4 +1,6 @@
 import { useRef, useState } from "react"
+import type { Measurement } from "../App"
+import { formatDistance } from "../lib/geo"
 import type { LinkedAnnotation, LinkStep, PhotoRegion } from "../lib/types"
 
 interface Props {
@@ -6,8 +8,9 @@ interface Props {
   links: LinkedAnnotation[]
   step: LinkStep
   pendingColor: string
-  selectedId: string | null
-  onSelect: (id: string | null) => void
+  selectedIds: string[]
+  measurement: Measurement | null
+  onSelect: (id: string) => void
   onRegionDrawn: (region: PhotoRegion) => void
 }
 
@@ -27,12 +30,17 @@ function dragToRegion(d: DragState): PhotoRegion {
   }
 }
 
+function center(r: PhotoRegion) {
+  return { x: r.x + r.w / 2, y: r.y + r.h / 2 }
+}
+
 export function PhotoPanel({
   imageUrl,
   links,
   step,
   pendingColor,
-  selectedId,
+  selectedIds,
+  measurement,
   onSelect,
   onRegionDrawn,
 }: Props) {
@@ -56,6 +64,9 @@ export function PhotoPanel({
   if (drag) {
     regions.push({ region: dragToRegion(drag), color: pendingColor, id: null })
   }
+
+  const measureA = measurement && center(measurement.a.photoRegion)
+  const measureB = measurement && center(measurement.b.photoRegion)
 
   return (
     <div className="photo-panel">
@@ -91,15 +102,39 @@ export function PhotoPanel({
               width={r.region.w * 100}
               height={r.region.h * 100}
               fill={r.color}
-              fillOpacity={r.id && r.id === selectedId ? 0.35 : 0.15}
+              fillOpacity={r.id && selectedIds.includes(r.id) ? 0.35 : 0.15}
               stroke={r.color}
-              strokeWidth={r.id && r.id === selectedId ? 0.8 : 0.4}
+              strokeWidth={r.id && selectedIds.includes(r.id) ? 0.8 : 0.4}
               vectorEffect="non-scaling-stroke"
               style={{ pointerEvents: drawing ? "none" : "auto", cursor: "pointer" }}
-              onClick={() => r.id && onSelect(r.id === selectedId ? null : r.id)}
+              onClick={() => r.id && onSelect(r.id)}
             />
           ))}
+          {measureA && measureB && (
+            <line
+              x1={measureA.x * 100}
+              y1={measureA.y * 100}
+              x2={measureB.x * 100}
+              y2={measureB.y * 100}
+              stroke="#fff"
+              strokeWidth={1.5}
+              strokeDasharray="6 4"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
         </svg>
+        {measureA && measureB && (
+          // HTML label: SVG text would distort in the stretched viewBox.
+          <div
+            className="distance-label"
+            style={{
+              left: `${((measureA.x + measureB.x) / 2) * 100}%`,
+              top: `${((measureA.y + measureB.y) / 2) * 100}%`,
+            }}
+          >
+            {formatDistance(measurement!.meters)}
+          </div>
+        )}
       </div>
     </div>
   )
