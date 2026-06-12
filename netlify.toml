@@ -1,5 +1,4 @@
-# Builds Mapflow experiment 01 (the current public face of mapflow.xyz).
+# Static landing page at /, experiment 01 at /01-ground-aerial-link/.
 [build]
-  base = "experiments/01-ground-aerial-link"
-  command = "npm run build"
-  publish = "dist"
+  command = "bash scripts/build-site.sh"
+  publish = "_site"
