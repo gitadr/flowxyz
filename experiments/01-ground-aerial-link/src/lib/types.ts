@@ -6,6 +6,9 @@ export interface PhotoMeta {
   headingDeg: number | null
   /** Horizontal field of view from EXIF focal length; null if unknown. */
   hfovDeg: number | null
+  /** Browser-oriented image dimensions, used for photo geometry. */
+  imageWidth: number
+  imageHeight: number
   takenAt: string | null
   /** Resection-corrected standpoint, if the user accepted one. */
   refined?: { lat: number; lng: number; headingDeg: number } | null

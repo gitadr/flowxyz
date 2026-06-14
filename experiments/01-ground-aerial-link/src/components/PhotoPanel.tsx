@@ -10,6 +10,7 @@ interface Props {
   pendingColor: string
   selectedIds: string[]
   measurement: Measurement | null
+  heightEstimate: { linkId: string; meters: number } | null
   onSelect: (id: string) => void
   onRegionDrawn: (region: PhotoRegion) => void
 }
@@ -41,6 +42,7 @@ export function PhotoPanel({
   pendingColor,
   selectedIds,
   measurement,
+  heightEstimate,
   onSelect,
   onRegionDrawn,
 }: Props) {
@@ -122,6 +124,24 @@ export function PhotoPanel({
               vectorEffect="non-scaling-stroke"
             />
           )}
+          {heightEstimate && (() => {
+            const link = links.find((item) => item.id === heightEstimate.linkId)
+            if (!link) return null
+            const x = (link.photoRegion.x + link.photoRegion.w) * 100
+            const y1 = link.photoRegion.y * 100
+            const y2 = (link.photoRegion.y + link.photoRegion.h) * 100
+            return (
+              <line
+                x1={x}
+                y1={y1}
+                x2={x}
+                y2={y2}
+                stroke="#fff"
+                strokeWidth={1.5}
+                vectorEffect="non-scaling-stroke"
+              />
+            )
+          })()}
         </svg>
         {measureA && measureB && (
           // HTML label: SVG text would distort in the stretched viewBox.
@@ -135,6 +155,21 @@ export function PhotoPanel({
             {formatDistance(measurement!.meters)}
           </div>
         )}
+        {heightEstimate && (() => {
+          const link = links.find((item) => item.id === heightEstimate.linkId)
+          if (!link) return null
+          return (
+            <div
+              className="height-label"
+              style={{
+                left: `${(link.photoRegion.x + link.photoRegion.w) * 100}%`,
+                top: `${link.photoRegion.y * 100}%`,
+              }}
+            >
+              ≈ {heightEstimate.meters.toFixed(1)} m
+            </div>
+          )
+        })()}
       </div>
     </div>
   )

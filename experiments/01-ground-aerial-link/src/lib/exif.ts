@@ -1,7 +1,11 @@
 import exifr from "exifr"
 import type { PhotoMeta } from "./types"
 
-export async function extractPhotoMeta(file: File): Promise<PhotoMeta> {
+export async function extractPhotoMeta(
+  file: File,
+  imageWidth: number,
+  imageHeight: number,
+): Promise<PhotoMeta> {
   let lat: number | null = null
   let lng: number | null = null
   let headingDeg: number | null = null
@@ -29,8 +33,9 @@ export async function extractPhotoMeta(file: File): Promise<PhotoMeta> {
       if (typeof dir === "number" && isFinite(dir)) headingDeg = dir
       const f35 = data.FocalLengthIn35mmFormat
       if (typeof f35 === "number" && f35 > 0) {
-        // Horizontal FOV across the 36mm-wide 35mm-equivalent frame.
-        hfovDeg = (2 * Math.atan(36 / (2 * f35)) * 180) / Math.PI
+        // Use the matching side of the 36×24 mm equivalent frame after orientation.
+        const frameWidthMm = imageWidth >= imageHeight ? 36 : 24
+        hfovDeg = (2 * Math.atan(frameWidthMm / (2 * f35)) * 180) / Math.PI
       }
       if (data.DateTimeOriginal instanceof Date) {
         takenAt = data.DateTimeOriginal.toISOString()
@@ -40,5 +45,14 @@ export async function extractPhotoMeta(file: File): Promise<PhotoMeta> {
     // No EXIF (screenshots, stripped images) — leave fields null.
   }
 
-  return { fileName: file.name, lat, lng, headingDeg, hfovDeg, takenAt }
+  return {
+    fileName: file.name,
+    lat,
+    lng,
+    headingDeg,
+    hfovDeg,
+    imageWidth,
+    imageHeight,
+    takenAt,
+  }
 }

@@ -4,6 +4,7 @@ import { MapPanel } from "./components/MapPanel"
 import { LinkList } from "./components/LinkList"
 import { extractPhotoMeta } from "./lib/exif"
 import { formatDistance, haversineMeters } from "./lib/geo"
+import { estimateObjectHeight } from "./lib/height"
 import { solveResection, type ResectionResult } from "./lib/resection"
 import { clearSession, downloadExport, saveSession } from "./lib/storage"
 import { usingNearmap } from "./lib/tiles"
@@ -33,6 +34,15 @@ export default function App() {
   const [step, setStep] = useState<LinkStep>({ mode: "idle" })
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [proposal, setProposal] = useState<ResectionResult | null>(null)
+  const [cameraHeightM, setCameraHeightM] = useState(1.5)
+  const [cameraGroundM, setCameraGroundM] = useState<number | null>(null)
+  const [objectGroundM, setObjectGroundM] = useState<Record<string, number>>({})
+  const [dtmPreview, setDtmPreview] = useState<{
+    cost: number
+    captureDate: string | null
+  } | null>(null)
+  const [dtmStatus, setDtmStatus] = useState<"idle" | "previewing" | "loading">("idle")
+  const [dtmError, setDtmError] = useState<string | null>(null)
 
   const pendingColor = COLORS[links.length % COLORS.length]
 
@@ -42,15 +52,23 @@ export default function App() {
 
   async function handleFile(file: File) {
     if (imageUrl) URL.revokeObjectURL(imageUrl)
-    setImageUrl(URL.createObjectURL(file))
+    const nextImageUrl = URL.createObjectURL(file)
+    const image = new Image()
+    image.src = nextImageUrl
+    await image.decode()
+    setImageUrl(nextImageUrl)
     setLinks([])
     setStep({ mode: "idle" })
     setSelectedIds([])
     setProposal(null)
-    setPhoto(await extractPhotoMeta(file))
+    setCameraGroundM(null)
+    setObjectGroundM({})
+    setPhoto(await extractPhotoMeta(file, image.naturalWidth, image.naturalHeight))
   }
 
   const toggleSelect = useCallback((id: string) => {
+    setDtmPreview(null)
+    setDtmError(null)
     setSelectedIds((prev) =>
       prev.includes(id)
         ? prev.filter((s) => s !== id)
@@ -74,6 +92,8 @@ export default function App() {
           mapPoint,
           createdAt: new Date().toISOString(),
         }
+        setDtmPreview(null)
+        setDtmError(null)
         setLinks((prev) => [...prev, link])
         return { mode: "idle" }
       })
@@ -123,6 +143,57 @@ export default function App() {
         }
       : null
 
+  const cameraPoint = photo.refined ??
+    (hasLocation ? { lat: photo.lat!, lng: photo.lng! } : null)
+  const heightLink = selected.length === 1 ? selected[0] : null
+  const heightDistanceM =
+    cameraPoint && heightLink
+      ? haversineMeters(cameraPoint, heightLink.mapPoint)
+      : null
+  const selectedObjectGroundM = heightLink ? objectGroundM[heightLink.id] : undefined
+  const heightResult =
+    heightLink && heightDistanceM != null && cameraGroundM != null && selectedObjectGroundM != null
+      ? estimateObjectHeight({
+          region: heightLink.photoRegion,
+          distanceM: heightDistanceM,
+          horizontalFovDeg: photo.hfovDeg ?? FALLBACK_HFOV_DEG,
+          imageWidth: photo.imageWidth,
+          imageHeight: photo.imageHeight,
+          cameraHeightM,
+          cameraGroundM,
+          objectGroundM: selectedObjectGroundM,
+        })
+      : null
+
+  async function requestDtm(method: "PUT" | "POST") {
+    if (!cameraPoint || !heightLink) return
+    setDtmStatus(method === "PUT" ? "previewing" : "loading")
+    setDtmError(null)
+    try {
+      const response = await fetch("/api/nearmap/dtm", {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          camera: cameraPoint,
+          objects: links.map((link) => ({ id: link.id, point: link.mapPoint })),
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error ?? "DTM request failed")
+      if (method === "PUT") {
+        setDtmPreview({ cost: data.cost, captureDate: data.captureDate })
+      } else {
+        setCameraGroundM(data.cameraGroundM)
+        setObjectGroundM((current) => ({ ...current, ...data.objectGroundM }))
+        setDtmPreview(null)
+      }
+    } catch (error) {
+      setDtmError(error instanceof Error ? error.message : "DTM request failed")
+    } finally {
+      setDtmStatus("idle")
+    }
+  }
+
   function refinePosition() {
     if (photo!.lat == null || photo!.lng == null) return
     const result = solveResection(
@@ -143,6 +214,9 @@ export default function App() {
         headingDeg: proposal.headingDeg,
       },
     })
+    setCameraGroundM(null)
+    setDtmPreview(null)
+    setDtmError(null)
     setProposal(null)
   }
 
@@ -245,6 +319,10 @@ export default function App() {
             setLinks([])
             setSelectedIds([])
             setProposal(null)
+            setCameraGroundM(null)
+            setObjectGroundM({})
+            setDtmPreview(null)
+            setDtmError(null)
             setStep({ mode: "idle" })
           }}
         >
@@ -260,6 +338,11 @@ export default function App() {
           pendingColor={pendingColor}
           selectedIds={selectedIds}
           measurement={measurement}
+          heightEstimate={
+            heightLink && heightResult
+              ? { linkId: heightLink.id, meters: heightResult.heightM }
+              : null
+          }
           onSelect={toggleSelect}
           onRegionDrawn={handleRegionDrawn}
         />
@@ -285,6 +368,13 @@ export default function App() {
             onDelete={(id) => {
               setLinks((prev) => prev.filter((l) => l.id !== id))
               setSelectedIds((prev) => prev.filter((s) => s !== id))
+              setObjectGroundM((current) => {
+                const next = { ...current }
+                delete next[id]
+                return next
+              })
+              setDtmPreview(null)
+              setDtmError(null)
             }}
           />
           {links.length >= 2 && !measurement && (
@@ -295,6 +385,108 @@ export default function App() {
               {measurement.a.label} ↔ {measurement.b.label}:{" "}
               <strong>{formatDistance(measurement.meters)}</strong>
             </p>
+          )}
+          {heightLink && (
+            <section className="height-estimator">
+              <h2>Rough height</h2>
+              <label>
+                Camera lens height
+                <span>
+                  <input
+                    type="number"
+                    min="0.1"
+                    step="0.1"
+                    value={cameraHeightM}
+                    onChange={(e) => setCameraHeightM(Number(e.target.value))}
+                  />
+                  m
+                </span>
+              </label>
+              <label>
+                Camera ground DTM
+                <span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={cameraGroundM ?? ""}
+                    onChange={(e) =>
+                      setCameraGroundM(e.target.value === "" ? null : Number(e.target.value))
+                    }
+                  />
+                  m
+                </span>
+              </label>
+              <label>
+                Object base DTM
+                <span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={selectedObjectGroundM ?? ""}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setObjectGroundM((current) => {
+                        if (value === "") {
+                          const next = { ...current }
+                          delete next[heightLink.id]
+                          return next
+                        }
+                        return { ...current, [heightLink.id]: Number(value) }
+                      })
+                    }}
+                  />
+                  m
+                </span>
+              </label>
+              <div className="dtm-actions">
+                {!dtmPreview ? (
+                  <button
+                    onClick={() => requestDtm("PUT")}
+                    disabled={dtmStatus !== "idle"}
+                  >
+                    {dtmStatus === "previewing"
+                      ? "Checking…"
+                      : `Check DTM cost for ${links.length} link${links.length === 1 ? "" : "s"}`}
+                  </button>
+                ) : (
+                  <button
+                    className="primary"
+                    onClick={() => requestDtm("POST")}
+                    disabled={dtmStatus !== "idle"}
+                  >
+                    {dtmStatus === "loading"
+                      ? "Loading…"
+                      : `Load DTM for all links · ${dtmPreview.cost} credits`}
+                  </button>
+                )}
+                {dtmPreview?.captureDate && (
+                  <span>Survey {dtmPreview.captureDate}</span>
+                )}
+                {dtmError && <span className="warn">{dtmError}</span>}
+              </div>
+              {heightDistanceM != null && (
+                <p className="height-result">
+                  {heightResult ? (
+                    <>
+                      <strong>≈ {heightResult.heightM.toFixed(1)} m</strong>
+                      <span>
+                        {heightDistanceM.toFixed(1)} m away · inferred pitch{" "}
+                        {heightResult.pitchDeg.toFixed(1)}°
+                      </span>
+                    </>
+                  ) : (
+                    <span>Could not estimate from this annotation.</span>
+                  )}
+                </p>
+              )}
+              <p className="hint">
+                Uses the box bottom as the base and top as the object top. Assumes
+                a vertical object and negligible camera roll.
+              </p>
+            </section>
+          )}
+          {links.length > 0 && selected.length !== 1 && (
+            <p className="hint">Select one linked object to estimate its height.</p>
           )}
         </aside>
       </main>
