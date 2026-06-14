@@ -47,11 +47,23 @@ Tile sources:
 - **Deployed (Netlify):** set `NEARMAP_API_KEY` (server-side, used by the
   `/api/tiles` proxy function in `netlify/functions/tiles.mjs`) and
   `VITE_NEARMAP_PROXY=true` (tells the client to use the proxy). The key never
-  appears in the client bundle.
+  appears in the client bundle. **Do not** set `VITE_NEARMAP_API_KEY` in the
+  deployed environment — that prefix bakes the key into the public bundle.
 - **Local dev:** put `VITE_NEARMAP_API_KEY` in `.env` for direct Nearmap
   access, or run `netlify dev` to exercise the proxy locally.
 - **No key at all:** the map falls back to OpenStreetMap tiles, so the
   workflow is testable without a Nearmap subscription.
+
+The proxy is public, so it enforces a few abuse controls to protect the
+Nearmap quota (see `netlify/functions/tiles.mjs`):
+
+- Only valid, in-range tiles up to zoom 21 are forwarded.
+- Requests must originate from this site (fail-closed on `Origin`/`Referer`).
+  Set `TILE_REQUIRE_REFERER=false` to relax if legitimate clients strip the
+  header.
+- Optional geographic allowlist: set `TILE_BBOX="minLng,minLat,maxLng,maxLat"`
+  to reject tiles outside an area of interest. Leave it unset to serve any
+  location.
 
 ## Data
 
