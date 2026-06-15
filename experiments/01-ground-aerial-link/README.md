@@ -36,7 +36,11 @@ Two analysis tools build on the links:
 
 ## Setup
 
+Requires Node `^20.19.0 || >=22.12.0` (Vite 7). With `nvm`, run `nvm use` to
+pick up the pinned version from `.nvmrc`.
+
 ```bash
+nvm use            # Node 22 (see .nvmrc)
 npm install
 cp .env.example .env   # add your Nearmap API key
 npm run dev
