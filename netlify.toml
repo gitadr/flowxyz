@@ -3,5 +3,10 @@
   command = "bash scripts/build-site.sh"
   publish = "_site"
 
+# Vite 7 (experiment 01) requires Node 20.19+/22.12+. Pin the build image's
+# Node here — the experiment's .nvmrc lives in a subdirectory Netlify doesn't read.
+[build.environment]
+  NODE_VERSION = "22"
+
 [functions]
   directory = "netlify/functions"
